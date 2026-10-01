@@ -1,0 +1,45 @@
+name: Build IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # cho phép bấm chạy tay trên tab Actions
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cài XcodeGen và sinh file .xcodeproj từ project.yml
+      - name: Cài XcodeGen và tạo project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      # Build bản archive không ký (ký lại khi sideload)
+      - name: Build archive (không ký)
+        run: |
+          xcodebuild archive \
+            -project AuraIPAVN.xcodeproj \
+            -scheme AuraIPAVN \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath build/AuraIPAVN.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      # Đóng gói .app thành .ipa
+      - name: Tạo IPA
+        run: |
+          mkdir -p build/Payload
+          cp -R build/AuraIPAVN.xcarchive/Products/Applications/AuraIPAVN.app build/Payload/
+          cd build
+          zip -qry AuraIPAVN.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: AuraIPAVN-ipa
+          path: build/AuraIPAVN.ipa

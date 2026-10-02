@@ -1,0 +1,61 @@
+name: Build IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    env:
+      PROJECT_DIR: AuraIPAVN-DNS-Tools   # thư mục chứa project.yml
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cài XcodeGen, sinh .xcodeproj và in ra để kiểm tra
+      - name: Install XcodeGen and generate project
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          brew install xcodegen
+          xcodegen generate --spec project.yml
+          echo "--- project.yml (5 dòng đầu) ---"; head -5 project.yml
+          echo "--- .xcodeproj được sinh ra ---"; find . -maxdepth 2 -name "*.xcodeproj"
+
+      # Tự dò tên project/scheme nên không phụ thuộc dòng name: trong project.yml
+      - name: Build archive (unsigned)
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          PROJ=$(find . -maxdepth 2 -name "*.xcodeproj" | head -1)
+          [ -n "$PROJ" ] || { echo "Không tìm thấy .xcodeproj"; exit 1; }
+          SCHEME=$(basename "$PROJ" .xcodeproj)
+          echo "Project: $PROJ | Scheme: $SCHEME"
+          mkdir -p build
+          xcodebuild archive \
+            -project "$PROJ" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath "build/App.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      # Lấy .app trong archive rồi đóng gói thành .ipa
+      - name: Create IPA
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          APP=$(find build/App.xcarchive/Products/Applications -maxdepth 1 -name "*.app" | head -1)
+          [ -n "$APP" ] || { echo "Không tìm thấy .app"; exit 1; }
+          mkdir -p build/Payload
+          cp -R "$APP" build/Payload/
+          cd build
+          zip -qry AuraIPAVN.ipa Payload
+
+      # Tải IPA lên Artifacts
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: AuraIPAVN-ipa
+          path: ${{ env.PROJECT_DIR }}/build/AuraIPAVN.ipa

@@ -1,0 +1,54 @@
+name: Build IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    env:
+      PROJECT_DIR: AuraIPAVN-DNS-Tools   # thư mục chứa project.yml
+      APP_NAME: AuraIPAVN
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Sinh file .xcodeproj từ project.yml (chạy trong thư mục dự án, không phải root repo)
+      - name: Generate Xcode project
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          brew install xcodegen
+          xcodegen generate --spec project.yml
+
+      # Build archive không ký (ký lại khi cài bằng Sideloadly/AltStore...)
+      - name: Build archive (unsigned)
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          mkdir -p build
+          xcodebuild archive \
+            -project "${APP_NAME}.xcodeproj" \
+            -scheme "${APP_NAME}" \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath "build/${APP_NAME}.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      # Đóng gói .app thành .ipa (IPA = zip của thư mục Payload)
+      - name: Create IPA
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          mkdir -p build/Payload
+          cp -R "build/${APP_NAME}.xcarchive/Products/Applications/${APP_NAME}.app" build/Payload/
+          cd build
+          zip -qry "${APP_NAME}.ipa" Payload
+
+      # Tải IPA lên mục Artifacts của workflow run
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: AuraIPAVN-ipa
+          path: ${{ env.PROJECT_DIR }}/build/${{ env.APP_NAME }}.ipa
